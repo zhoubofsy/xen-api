@@ -31,6 +31,59 @@ let update_allowed_operations ~__context ~self : unit =
 let assert_attachable ~__context ~self : unit = 
   assert_attachable ~__context ~self
 
+let print_fork_error f =
+  try
+    f ()
+  with Forkhelpers.Spawn_internal_error(stderr, stdout, status) as e ->
+    begin match status with
+      | Unix.WEXITED n ->
+        error "XXXX Forkhelpers.Spawn_internal_error(%s, %s, WEXITED %d)" stderr stdout n;
+        raise e
+      | Unix.WSIGNALED n ->
+        error "XXXX Forkhelpers.Spawn_internal_error(%s, %s, WSIGNALED %d)" stderr stdout n;
+        raise e
+      | Unix.WSTOPPED n ->
+        error "XXXX Forkhelpers.Spawn_internal_error(%s, %s, WSTOPPED %d)" stderr stdout n;
+        raise e
+    end
+
+let start_nbd_client ~unix_socket_path ~export_name =
+  Forkhelpers.execute_command_get_output !Xapi_globs.modprobe_path ["nbd"] |> ignore;
+  let is_used ~nbd_device =
+    (* First check if the file exists, because "nbd-client -c" returns
+       1 for a non-existent file. *)
+    if not (Sys.file_exists nbd_device) then failwith ("NBD device file " ^ nbd_device ^ " does not exist");
+    print_fork_error (fun () ->
+        try
+          Forkhelpers.execute_command_get_output "nbd-client" ["-check"; nbd_device] |> ignore;
+          true
+        with Forkhelpers.Spawn_internal_error(stderr, stdout, status) as e ->
+          begin match status with
+            | Unix.WEXITED 1 -> false
+            | _ -> raise e
+          end
+      )
+  in
+  let find_free_nbd_device () =
+    let rec loop i =
+      let nbd_device = "/dev/nbd" ^ (string_of_int i) in
+      if not (is_used ~nbd_device) then nbd_device else loop (i + 1)
+    in
+    loop 0
+  in
+  let run_nbd_client ~nbd_device =
+    print_fork_error (fun () ->
+        debug "XXXX '/usr/sbin/nbd-client' '-unix' '%s' '%s' '-name' '%s'" unix_socket_path nbd_device export_name;
+        Forkhelpers.execute_command_get_output "/usr/sbin/nbd-client" ["-unix"; unix_socket_path; nbd_device; "-name"; export_name] |> ignore
+      )
+  in
+  debug "XXXX finding free NBD device";
+  let nbd_device = find_free_nbd_device () in
+  debug "XXXX starting NBD client with %s" nbd_device;
+  run_nbd_client ~nbd_device;
+  nbd_device
+
+let stop_nbd_client ~nbd_device = Forkhelpers.execute_command_get_output "nbd-client" ["-disconnect"; nbd_device] |> ignore
 
 let set_mode ~__context ~self ~value =
   let vm = Db.VBD.get_VM ~__context ~self in
@@ -47,10 +100,25 @@ let plug ~__context ~self =
     Storage_access.attach_and_activate ~__context ~vbd:self ~domid ~hvm
       (fun attach_info ->
          let params = attach_info.Storage_interface.params in
-         let prefix = "/dev/" in
-         let prefix_len = String.length prefix in
-         let path = String.sub params prefix_len (String.length params - prefix_len) in
-         Db.VBD.set_device ~__context ~self ~value:path;
+         let nbd_prefix = "hack|nbd:unix:" in
+         let is_nbd = String.startswith nbd_prefix params in
+         let device_path =
+           if is_nbd then begin
+             let export_name = "qemu_node" in
+             let unix_socket_path = params |> Astring.String.cuts ~empty:false ~sep:nbd_prefix |> List.hd |> String.split_on_char '|' |> List.hd in
+             start_nbd_client ~unix_socket_path ~export_name
+           end
+           else params
+         in
+         debug "XXXX device_path: %s" device_path;
+         let device_path =
+           let prefix = "/dev/" in
+           let prefix_len = String.length prefix in
+           String.sub device_path prefix_len (String.length device_path - prefix_len)
+         in
+         debug "XXXX device_path: %s" device_path;
+         Db.VBD.set_device ~__context ~self ~value:device_path;
+         debug "XXXX PIF device: %s" (Db.VBD.get_device ~__context ~self);
          Db.VBD.set_currently_attached ~__context ~self ~value:true;
       )
   end
@@ -70,6 +138,10 @@ let unplug ~__context ~self =
     debug "VBD.unplug of loopback VBD '%s'" (Ref.string_of self);
     let domid = Int64.to_int (Db.VM.get_domid ~__context ~self:vm) in
     Storage_access.deactivate_and_detach ~__context ~vbd:self ~domid;
+    let device = Db.VBD.get_device ~__context ~self in
+    let nbd_device_prefix = "nbd" in
+    let is_nbd = String.startswith nbd_device_prefix device in
+    if is_nbd then stop_nbd_client ~nbd_device:("/dev/" ^ device);
     Db.VBD.set_currently_attached ~__context ~self ~value:false
   end
   else Xapi_xenops.vbd_unplug ~__context ~self false
