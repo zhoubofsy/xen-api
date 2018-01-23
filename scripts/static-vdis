@@ -251,6 +251,7 @@ def find_unused_nbd_device():
 
 
 def connect_nbd(path, exportname):
+    subprocess.check_output(['modprobe', 'nbd'])
     nbd_device = find_unused_nbd_device()
     cmd = ['nbd-client', '-unix', path, nbd_device, '-name', exportname]
     subprocess.check_output(cmd)
