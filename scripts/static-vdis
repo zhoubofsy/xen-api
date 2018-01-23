@@ -308,6 +308,8 @@ def detach(vdi_uuid):
                 return
             found = True
             d = main_dir + "/" + existing['id']
+            if disk.startswith('/dev/nbd'):
+                disconnect_nbd_device(disk)
             if not (os.path.exists(d + "/sr-uri")):
                 # SMAPIv1
                 config = read_whole_file(d + "/config")
