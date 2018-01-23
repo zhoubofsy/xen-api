@@ -285,16 +285,14 @@ def attach(vdi_uuid):
                     scheme = urlparse.urlparse(vol_uri).scheme
                     sr = call_volume_plugin(volume_plugin, "SR.attach", [ sr_uuid, sr_uri ])
                     attach = call_datapath_plugin(scheme, "Datapath.attach", [ vol_uri, "0" ])
-                    params = attach['params']
+                    path = attach['implementation'][1]
                     call_datapath_plugin(scheme, "Datapath.activate", [ vol_uri, "0" ])
                     nbd_prefix = 'hack|nbd:unix:'
-                    nbd = params.startswith(nbd_prefix)
+                    nbd = path.startswith(nbd_prefix)
                     if nbd:
-                        params = params[len(nbd_prefix):]
-                        socket_path = params.split('|')[0]
+                        path = path[len(nbd_prefix):]
+                        socket_path = path.split('|')[0]
                         path = connect_nbd(socket_path, 'qemu_node')
-                    else:
-                        path = attach['implementation'][1]
 
                 os.symlink(path, d + "/disk")
                 return d + "/disk"
