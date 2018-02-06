@@ -50,19 +50,18 @@ let print_fork_error f =
 let start_nbd_client ~unix_socket_path ~export_name =
   Forkhelpers.execute_command_get_output !Xapi_globs.modprobe_path ["nbd"] |> ignore;
   let is_used ~nbd_device =
+    debug "XXXX checking whether %s is in use" nbd_device;
     (* First check if the file exists, because "nbd-client -c" returns
        1 for a non-existent file. *)
     if not (Sys.file_exists nbd_device) then failwith ("NBD device file " ^ nbd_device ^ " does not exist");
-    print_fork_error (fun () ->
-        try
-          Forkhelpers.execute_command_get_output "nbd-client" ["-check"; nbd_device] |> ignore;
-          true
-        with Forkhelpers.Spawn_internal_error(stderr, stdout, status) as e ->
-          begin match status with
-            | Unix.WEXITED 1 -> false
-            | _ -> raise e
-          end
-      )
+    try
+      print_fork_error (fun () -> Forkhelpers.execute_command_get_output "nbd-client" ["-check"; nbd_device]) |> ignore;
+      true
+    with Forkhelpers.Spawn_internal_error(stderr, stdout, status) as e ->
+      begin match status with
+        | Unix.WEXITED 1 -> false
+        | _ -> raise e
+      end
   in
   let find_free_nbd_device () =
     let rec loop i =
@@ -83,7 +82,9 @@ let start_nbd_client ~unix_socket_path ~export_name =
   run_nbd_client ~nbd_device;
   nbd_device
 
-let stop_nbd_client ~nbd_device = Forkhelpers.execute_command_get_output "nbd-client" ["-disconnect"; nbd_device] |> ignore
+let stop_nbd_client ~nbd_device =
+  debug "XXXX stop_nbd_client %s" nbd_device;
+  print_fork_error (fun () -> Forkhelpers.execute_command_get_output "nbd-client" ["-disconnect"; nbd_device]) |> ignore
 
 let set_mode ~__context ~self ~value =
   let vm = Db.VBD.get_VM ~__context ~self in
