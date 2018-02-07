@@ -24,7 +24,7 @@ let unmarshall schema dbconn =
   then Db_xml.From.file schema filename
   else
     let compressed = Unix.openfile filename [ Unix.O_RDONLY ] 0o0 in
-    Stdext.Pervasiveext.finally
+    Xapi_stdext_pervasives.Pervasiveext.finally
       (fun () ->
          let result = ref None in
          Gzip.decompress_passive compressed
@@ -54,7 +54,7 @@ let flush dbconn db =
 
   let do_flush_xml db filename =
     Redo_log.flush_db_to_all_active_redo_logs db;
-    Stdext.Unixext.atomic_write_to_file filename 0o0644
+    Xapi_stdext_unix.Unixext.atomic_write_to_file filename 0o0644
       (fun fd ->
          if not dbconn.Parse_db_conf.compress
          then Db_xml.To.fd fd db
@@ -65,7 +65,7 @@ let flush dbconn db =
 
   let do_flush_gen db filename =
     let generation = Manifest.generation (Database.manifest db) in
-    Stdext.Unixext.write_string_to_file filename (Generation.to_string generation) in
+    Xapi_stdext_unix.Unixext.write_string_to_file filename (Generation.to_string generation) in
 
   let filename = dbconn.Parse_db_conf.path in
   do_flush_xml db filename;

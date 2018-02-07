@@ -33,7 +33,7 @@ let failwith str = raise (Cli_util.Cli_failure str)
 exception ExitWithError of int
 
 let bool_of_string param string =
-  let s = String.lowercase string in
+  let s = String.lowercase_ascii string in
   match s with
     "true" -> true
   | "t" -> true
@@ -151,10 +151,10 @@ let diagnostic_net_stats printer rpc session_id params =
   let all = Http_svr.Server.all_stats Xapi_http.server in
   let meth (m, _, _) =
     not (List.mem_assoc "method" params)
-    || (String.lowercase(Http.string_of_method_t m) = String.lowercase (List.assoc "method" params)) in
+    || (String.lowercase_ascii(Http.string_of_method_t m) = String.lowercase_ascii (List.assoc "method" params)) in
   let uri (_, u, _) =
     not (List.mem_assoc "uri" params)
-    || (String.lowercase u = String.lowercase (List.assoc "uri" params)) in
+    || (String.lowercase_ascii u = String.lowercase_ascii (List.assoc "uri" params)) in
   let has_param x = not(List.mem_assoc "params" params) || (List.mem x (String.split ',' (List.assoc "params" params))) in
   let all = List.filter meth (List.filter uri all) in
   let rows = List.map
@@ -208,14 +208,23 @@ let host_license_of_r host_r editions =
     else
       0.
   in
-  let edition = host_r.API.host_edition in
-  let edition_short = List.hd
-      (List.filter_map (fun (a, (_, b, _)) -> if a = edition then Some b else None) editions) in
+  let edition_str = host_r.API.host_edition in
+  let unavailable_edition_str = "N/A" in
+  let edition_short =
+    editions
+    |> List.filter_map
+      V6_interface.(fun ed -> if ed.title = edition_str
+                     then Some ed.code
+                     else None)
+    |> (function
+        | a::_ -> a
+        | _ -> unavailable_edition_str
+      ) in
   {
     hostname = host_r.API.host_hostname;
     uuid = host_r.API.host_uuid;
     rstr = rstr;
-    edition = edition;
+    edition = edition_str;
     edition_short = edition_short;
     expiry = expiry;
   }
@@ -453,7 +462,7 @@ let filter_records_on_set_param records (k,v) s =
       let set = get_set () in
       let set, v =
         if field.case_insensitive
-        then List.map String.lowercase set, String.lowercase v
+        then List.map String.lowercase_ascii set, String.lowercase_ascii v
         else set, v in
       List.exists (fun member -> v=member) set
     with
@@ -475,7 +484,7 @@ let filter_records_on_map_param records (k,v) s =
       let map = get_map () in
       let map, key, v =
         if field.case_insensitive
-        then List.map (fun (k, v) -> String.lowercase k, v) map, String.lowercase key, String.lowercase v
+        then List.map (fun (k, v) -> String.lowercase_ascii k, v) map, String.lowercase_ascii key, String.lowercase_ascii v
         else map, key, v in
       List.mem_assoc key map && List.assoc key map = v
     with
@@ -488,7 +497,7 @@ let filter_records_on_normal_param records (k,v) =
     let field = field_lookup record.fields k in
     let value = safe_get_field field in
     if field.case_insensitive
-    then String.lowercase value = String.lowercase v
+    then String.lowercase_ascii value = String.lowercase_ascii v
     else value=v
   in
   List.filter filterfn records
@@ -3203,7 +3212,7 @@ let with_license_server_changes printer rpc session_id params hosts f =
   | Api_errors.Server_error (name, args) as e
     when name = Api_errors.invalid_edition ->
     let editions = (V6_client.get_editions "host_apply_edition")
-                   |> List.map (fun (x, _) -> x)
+                   |> List.map V6_interface.(fun ed -> ed.title)
                    |> String.concat ", "
     in
     printer (Cli_printer.PStderr ("Valid editions are: " ^ editions ^ "\n"));
@@ -3221,7 +3230,7 @@ let host_apply_edition printer rpc session_id params =
     (fun rpc session_id -> Client.Host.apply_edition rpc session_id host edition false)
 
 let host_all_editions printer rpc session_id params =
-  let editions = List.map (fun (e, _) -> e) (V6_client.get_editions "host_all_editions") in
+  let editions = List.map V6_interface.(fun ed -> ed.title) (V6_client.get_editions "host_all_editions") in
   printer (Cli_printer.PList editions)
 
 let host_evacuate printer rpc session_id params =
@@ -3438,7 +3447,7 @@ let vm_import fd printer rpc session_id params =
 
     (* Special-case where the user accidentally sets filename=<path to ova.xml file> *)
     let filename =
-      if String.endswith "ova.xml" (String.lowercase filename)
+      if String.endswith "ova.xml" (String.lowercase_ascii filename)
       then String.sub filename 0 (String.length filename - (String.length "ova.xml"))
       else filename in
 

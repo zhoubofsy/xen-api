@@ -83,7 +83,7 @@ let pre_join_checks ~__context ~rpc ~session_id ~force =
         let editions = V6_client.get_editions "assert_restrictions_match" in
         let edition_to_int e =
           try
-            match List.find (fun (name, _) -> name = e) editions with _, (_, _, a) -> a
+            V6_interface.(match List.find (fun ed -> ed.title = e) editions with ed -> ed.order)
           with Not_found ->
             (* Happens if pool has edition "free/libre" (no v6d) *)
             error "Pool.join failed: pool has a host with edition unknown to v6d: %s" e;
@@ -2042,7 +2042,10 @@ let disable_local_storage_caching ~__context ~self =
   else ()
 
 let get_license_state ~__context ~self =
-  let edition_to_int = List.map (fun (e, (_, _, i)) -> e, i) (V6_client.get_editions "get_license_state") in
+  let edition_to_int =
+    List.map
+      V6_interface.(fun ed -> ed.title, ed.order)
+      (V6_client.get_editions "get_license_state") in
   let hosts = Db.Host.get_all ~__context in
   let pool_edition, expiry = Xapi_pool_license.get_lowest_edition_with_expiry ~__context ~hosts ~edition_to_int in
   let pool_expiry =
